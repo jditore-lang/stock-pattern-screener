@@ -155,7 +155,6 @@ if selected_pattern != "None":
         display_df['Price'] = display_df['Price'].apply(lambda x: f"${x:,.2f}")
         display_df['Daily Change %'] = display_df['Daily Change %'].apply(lambda x: f"+{x}%" if x > 0 else f"{x}%")
         
-        # Positioned the 7D Mini Chart thumbnail directly to the right of the stock symbol
         column_order = ["Ticker", "7D Trend", "Company", "Exchange", "MarketCap", "Price", "Daily Change %"]
         
         selected_rows = st.dataframe(
@@ -164,7 +163,6 @@ if selected_pattern != "None":
             on_select="rerun", selection_mode="single-row"
         )
         
-        # FIX: Swapped out legacy index lookup logic for explicit attribute mapping
         if selected_rows and selected_rows.selection.rows:
             selected_index = selected_rows.selection.rows[0]
             clicked_ticker = display_df.iloc[selected_index]["Ticker"]
@@ -211,4 +209,6 @@ if selected_pattern != "None":
                     
                     st.plotly_chart(fig, use_container_width=True)
     else:
-        st.warning("No highly liquid stocks are hitting this strict math baseline today. Try lowering your Market Cap Slider
+        st.warning("No highly liquid stocks are hitting this strict math baseline today. Try lowering your Market Cap Slider to allow mid-caps or check a different pattern strategy.")
+else:
+    st.info("Select a chart pattern strategy above to initiate the data scan engine.")
