@@ -32,7 +32,6 @@ def load_liquid_universe():
 
 # 2. OPTIMIZED HIGH-SPEED SCAN ENGINE
 def run_optimized_scan(all_tickers, pattern, market_cap_limit):
-    # FIX: Corrected internal local naming check variable to resolve NameError
     if pattern == "None" or not all_tickers:
         return pd.DataFrame()
         
@@ -156,6 +155,7 @@ if selected_pattern != "None":
         display_df['Price'] = display_df['Price'].apply(lambda x: f"${x:,.2f}")
         display_df['Daily Change %'] = display_df['Daily Change %'].apply(lambda x: f"+{x}%" if x > 0 else f"{x}%")
         
+        # Positioned the 7D Mini Chart thumbnail directly to the right of the stock symbol
         column_order = ["Ticker", "7D Trend", "Company", "Exchange", "MarketCap", "Price", "Daily Change %"]
         
         selected_rows = st.dataframe(
@@ -164,8 +164,9 @@ if selected_pattern != "None":
             on_select="rerun", selection_mode="single-row"
         )
         
-        if selected_rows and "selection" in selected_rows and selected_rows["selection"]["rows"]:
-            selected_index = selected_rows["selection"]["rows"][0]
+        # FIX: Swapped out legacy index lookup logic for explicit attribute mapping
+        if selected_rows and selected_rows.selection.rows:
+            selected_index = selected_rows.selection.rows[0]
             clicked_ticker = display_df.iloc[selected_index]["Ticker"]
             clicked_name = display_df.iloc[selected_index]["Company"]
             
@@ -176,4 +177,38 @@ if selected_pattern != "None":
                 df_year = yf.download(clicked_ticker, period="1y", interval="1d", progress=False, multi_level_index=False)
                 if not df_year.empty:
                     df_year['50 MA'] = df_year['Close'].rolling(window=50).mean()
-                    df_year['200 MA'] =
+                    df_year['200 MA'] = df_year['Close'].rolling(window=200).mean()
+                    
+                    fig = go.Figure()
+                    
+                    fig.add_trace(go.Candlestick(
+                        x=df_year.index,
+                        open=df_year['Open'],
+                        high=df_year['High'],
+                        low=df_year['Low'],
+                        close=df_year['Close'],
+                        name='Price Action'
+                    ))
+                    
+                    fig.add_trace(go.Scatter(
+                        x=df_year.index, y=df_year['50 MA'],
+                        line=dict(color='orange', width=1.5),
+                        name='50-Day SMA'
+                    ))
+                    
+                    fig.add_trace(go.Scatter(
+                        x=df_year.index, y=df_year['200 MA'],
+                        line=dict(color='red', width=2.0),
+                        name='200-Day SMA'
+                    ))
+                    
+                    fig.update_layout(
+                        height=500,
+                        xaxis_rangeslider_visible=False,
+                        margin=dict(l=10, r=10, t=20, b=10),
+                        legend=dict(orientation="h", y=1.08, x=0, xanchor="left")
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("No highly liquid stocks are hitting this strict math baseline today. Try lowering your Market Cap Slider
