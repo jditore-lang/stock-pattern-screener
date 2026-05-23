@@ -46,7 +46,6 @@ def run_optimized_scan(tickers, pattern, market_cap_limit):
         progress_bar.progress(min(i / total_tickers, 1.0), text=f"Analyzing setups {i}/{total_tickers}...")
         
         try:
-            # FIX: Added multi_level_index=False to the batch download step as well
             history = yf.download(chunk, period="30d", interval="1d", group_by='ticker', progress=False, multi_level_index=False)
             
             for t in chunk:
@@ -96,7 +95,8 @@ def run_optimized_scan(tickers, pattern, market_cap_limit):
     for m in matches:
         try:
             info = yf.Ticker(m['Ticker']).info
-            mc_billions = round(info.get('marketCap', 0) / 1_000_000_000, 2)
+            mc_bytes = info.get('marketCap', 0)
+            mc_billions = round(mc_bytes / 1_000_000_000, 2) if mc_bytes else 0
             
             if mc_billions >= market_cap_limit:
                 yesterday = m['History'][-2] if len(m['History']) > 1 else m['Price']
@@ -143,68 +143,7 @@ for p in [pattern_cont, pattern_bil]:
 if selected_pattern != "None":
     st.markdown(f"### 📊 Live Screen Results for: **{selected_pattern}**")
     
-    screened_matches = run_optimized_scan(list_of_tickers, selected_pattern, min_market_cap)
-    
-    if not screened_matches.empty:
-        display_df = screened_matches.copy()
-        display_df['MarketCap'] = display_df['MarketCap'].apply(lambda x: f"${x:,.1f} B")
-        display_df['Price'] = display_df['Price'].apply(lambda x: f"${x:,.2f}")
-        display_df['Daily Change %'] = display_df['Daily Change %'].apply(lambda x: f"+{x}%" if x > 0 else f"{x}%")
-        
-        column_order = ["Ticker", "Company", "Exchange", "MarketCap", "Price", "Daily Change %", "7D Trend"]
-        
-        selected_rows = st.dataframe(
-            display_df, use_container_width=True, hide_index=True, column_order=column_order,
-            column_config={"7D Trend": st.column_config.LineChartColumn("7D Mini Chart")},
-            on_select="rerun", selection_mode="single-row"
-        )
-        
-        if selected_rows and selected_rows.get("selection", {}).get("rows"):
-            selected_index = selected_rows["selection"]["rows"][0]
-            clicked_ticker = display_df.iloc[selected_index]["Ticker"]
-            clicked_name = display_df.iloc[selected_index]["Company"]
-            
-            st.markdown("---")
-            st.markdown(f"## 📊 Candlestick Trend Profile: {clicked_name} (`{clicked_ticker}`)")
-            
-            with st.spinner(f"Generating 1-year candlestick framework..."):
-                df_year = yf.download(clicked_ticker, period="1y", interval="1d", progress=False, multi_level_index=False)
-                if not df_year.empty:
-                    df_year['50 MA'] = df_year['Close'].rolling(window=50).mean()
-                    df_year['200 MA'] = df_year['Close'].rolling(window=200).mean()
-                    
-                    fig = go.Figure()
-                    
-                    fig.add_trace(go.Candlestick(
-                        x=df_year.index,
-                        open=df_year['Open'],
-                        high=df_year['High'],
-                        low=df_year['Low'],
-                        close=df_year['Close'],
-                        name='Price Action'
-                    ))
-                    
-                    fig.add_trace(go.Scatter(
-                        x=df_year.index, y=df_year['50 MA'],
-                        line=dict(color='orange', width=1.5),
-                        name='50-Day SMA'
-                    ))
-                    
-                    fig.add_trace(go.Scatter(
-                        x=df_year.index, y=df_year['200 MA'],
-                        line=dict(color='red', width=2.0),
-                        name='200-Day SMA'
-                    ))
-                    
-                    fig.update_layout(
-                        height=500,
-                        xaxis_rangeslider_visible=False,
-                        margin=dict(l=10, r=10, t=20, b=10),
-                        legend=dict(orientation="h", y=1.08, x=0, xanchor="left")
-                    )
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.warning("No highly liquid stocks are hitting this strict math baseline today. Try lowering your Market Cap Slider to allow mid-caps or check a different pattern strategy.")
-else:
-    st.info("Select a chart pattern strategy above to initiate the data scan engine.")
+    # Store results in Streamlit Session State memory to isolate it from line selection clicks
+    state_key = f"results_{selected_pattern}_{min_market_cap}"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = run
