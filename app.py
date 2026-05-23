@@ -116,3 +116,92 @@ def run_full_market_scan(all_tickers, pattern, market_cap_limit):
             if mc_billions >= market_cap_limit:
                 yesterday = m['History'][-2] if len(m['History']) > 1 else m['Price']
                 chg_pct = round(((m['Price'] - yesterday) / yesterday) * 100, 2)
+                
+                final_rows.append({
+                    'Ticker': m['Ticker'],
+                    'Company': info.get('longName', m['Ticker']),
+                    'Exchange': info.get('exchange', 'NYSE/NASDAQ'),
+                    'MarketCap': mc_billions,
+                    'Price': m['Price'],
+                    'Daily Change %': chg_pct,
+                    '7D Trend': m['History']
+                })
+        except Exception:
+            continue
+            
+    return pd.DataFrame(final_rows)
+
+# --- APPLICATION INTERFACE LAUNCHER ---
+# UI alert safely initialized outside the caching boundary to bypass CacheReplayClosureError
+st.toast("Connecting to Nasdaq FTP server to download entire market universe...")
+list_of_tickers = get_all_live_tickers()
+
+st.write("### Market Cap Threshold")
+min_market_cap = st.slider(
+    label="Slide to filter out smaller market cap stocks",
+    min_value=0, max_value=2000, value=5, step=5, format="$%d B"
+)
+
+st.markdown("---")
+st.markdown("## What stocks would you like to see?")
+
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.markdown("### 🔄 Reversal Patterns")
+    pattern_rev = st.radio("Select Reversal:", ["None"])
+with col2:
+    st.markdown("### 📈 Continuation Patterns")
+    pattern_cont = st.radio("Select Continuation:", ["None", "Bull Flag / Consolidation", "Bear Flag"])
+with col3:
+    st.markdown("### ↔️ Bilateral Patterns")
+    pattern_bil = st.radio("Select Bilateral:", ["None", "High Volatility Breakout"])
+
+selected_pattern = "None"
+for p in [pattern_rev, pattern_cont, pattern_bil]:
+    if p != "None":
+        selected_pattern = p
+
+if selected_pattern != "None":
+    st.markdown(f"### 📊 Live Full-Market Screen Results for: **{selected_pattern}**")
+    
+    screened_matches = run_full_market_scan(list_of_tickers, selected_pattern, min_market_cap)
+    
+    if not screened_matches.empty:
+        display_df = screened_matches.copy()
+        display_df['MarketCap'] = display_df['MarketCap'].apply(lambda x: f"${x:,.1f} B")
+        display_df['Price'] = display_df['Price'].apply(lambda x: f"${x:,.2f}")
+        display_df['Daily Change %'] = display_df['Daily Change %'].apply(lambda x: f"+{x}%" if x > 0 else f"{x}%")
+        
+        column_order = ["Ticker", "Company", "Exchange", "MarketCap", "Price", "Daily Change %", "7D Trend"]
+        
+        selected_rows = st.dataframe(
+            display_df, use_container_width=True, hide_index=True, column_order=column_order,
+            column_config={"7D Trend": st.column_config.LineChartColumn("7D Mini Chart")},
+            on_select="rerun", selection_mode="single-row"
+        )
+        
+        # Deep-Dive Section: Displays 1-year historical overlay with moving averages on click
+        if selected_rows and selected_rows.get("selection", {}).get("rows"):
+            selected_index = selected_rows["selection"]["rows"][0]
+            clicked_ticker = display_df.iloc[selected_index]["Ticker"]
+            clicked_name = display_df.iloc[selected_index]["Company"]
+            
+            st.markdown("---")
+            st.markdown(f"## 📈 Long-Term Trend Analysis: {clicked_name} (`{clicked_ticker}`)")
+            
+            with st.spinner(f"Downloading 1-year candlestick profile..."):
+                df_year = yf.download(clicked_ticker, period="1y", interval="1d", progress=False)
+                if not df_year.empty:
+                    df_year['50 MA'] = df_year['Close'].rolling(window=50).mean()
+                    df_year['200 MA'] = df_year['Close'].rolling(window=200).mean()
+                    
+                    chart_data = pd.DataFrame({
+                        'Close Price': df_year['Close'],
+                        '50-Day SMA': df_year['50 MA'],
+                        '200-Day SMA': df_year['200 MA']
+                    }, index=df_year.index)
+                    st.line_chart(chart_data, height=400)
+    else:
+        st.warning("No stocks across the entire exchange are forming this structural layout today.")
+else:
+    st.info("Select a chart pattern category above to start a live full-market scan.")
