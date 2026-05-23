@@ -114,3 +114,5 @@ def run_full_market_scan(all_tickers, pattern, market_cap_limit):
             mc_billions = round(info.get('marketCap', 0) / 1_000_000_000, 2)
             
             if mc_billions >= market_cap_limit:
+                yesterday = m['History'][-2] if len(m['History']) > 1 else m['Price']
+                chg_pct = round(((m['Price'] - yesterday) / yesterday) * 100, 2)
