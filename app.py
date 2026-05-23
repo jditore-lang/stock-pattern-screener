@@ -31,18 +31,19 @@ def load_liquid_universe():
     return sorted(list(set(tickers)))
 
 # 2. OPTIMIZED HIGH-SPEED SCAN ENGINE
-def run_optimized_scan(tickers, pattern, market_cap_limit):
-    if pattern == "None" or not tickers:
+def run_optimized_scan(all_tickers, pattern, market_cap_limit):
+    # FIX: Corrected internal local naming check variable to resolve NameError
+    if pattern == "None" or not all_tickers:
         return pd.DataFrame()
         
     matches = []
     progress_bar = st.progress(0, text="Downloading market data matrices...")
     
     chunk_size = 40
-    total_tickers = len(tickers)
+    total_tickers = len(all_tickers)
     
     for i in range(0, total_tickers, chunk_size):
-        chunk = tickers[i:i+chunk_size]
+        chunk = all_tickers[i:i+chunk_size]
         progress_bar.progress(min(i / total_tickers, 1.0), text=f"Analyzing setups {i}/{total_tickers}...")
         
         try:
@@ -143,7 +144,36 @@ for p in [pattern_cont, pattern_bil]:
 if selected_pattern != "None":
     st.markdown(f"### 📊 Live Screen Results for: **{selected_pattern}**")
     
-    # Store results in Streamlit Session State memory to isolate it from line selection clicks
     state_key = f"results_{selected_pattern}_{min_market_cap}"
     if state_key not in st.session_state:
-        st.session_state[state_key] = run
+        st.session_state[state_key] = run_optimized_scan(list_of_tickers, selected_pattern, min_market_cap)
+        
+    screened_matches = st.session_state[state_key]
+    
+    if not screened_matches.empty:
+        display_df = screened_matches.copy()
+        display_df['MarketCap'] = display_df['MarketCap'].apply(lambda x: f"${x:,.1f} B")
+        display_df['Price'] = display_df['Price'].apply(lambda x: f"${x:,.2f}")
+        display_df['Daily Change %'] = display_df['Daily Change %'].apply(lambda x: f"+{x}%" if x > 0 else f"{x}%")
+        
+        column_order = ["Ticker", "7D Trend", "Company", "Exchange", "MarketCap", "Price", "Daily Change %"]
+        
+        selected_rows = st.dataframe(
+            display_df, use_container_width=True, hide_index=True, column_order=column_order,
+            column_config={"7D Trend": st.column_config.LineChartColumn("7D Mini Chart")},
+            on_select="rerun", selection_mode="single-row"
+        )
+        
+        if selected_rows and "selection" in selected_rows and selected_rows["selection"]["rows"]:
+            selected_index = selected_rows["selection"]["rows"][0]
+            clicked_ticker = display_df.iloc[selected_index]["Ticker"]
+            clicked_name = display_df.iloc[selected_index]["Company"]
+            
+            st.markdown("---")
+            st.markdown(f"## 📊 Candlestick Trend Profile: {clicked_name} (`{clicked_ticker}`)")
+            
+            with st.spinner(f"Generating 1-year candlestick framework..."):
+                df_year = yf.download(clicked_ticker, period="1y", interval="1d", progress=False, multi_level_index=False)
+                if not df_year.empty:
+                    df_year['50 MA'] = df_year['Close'].rolling(window=50).mean()
+                    df_year['200 MA'] =
