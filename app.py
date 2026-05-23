@@ -8,7 +8,6 @@ st.set_page_config(layout="wide")
 # 1. DOWNLOAD A LIQUID, HIGH-VOLUME MARKET UNIVERSE ACROSS THE ENTIRE ALPHABET
 @st.cache_data(ttl=86400)
 def load_liquid_universe():
-    # A robust list of the top 120 most liquid, high-volume market drivers across all sectors and letters
     tickers = [
         'AAPL', 'ABBV', 'ABT', 'ACN', 'ADB', 'ADI', 'ADM', 'ADP', 'ADSK', 'AIG', 
         'AMAT', 'AMD', 'AMGN', 'AMZN', 'ANET', 'APA', 'APTV', 'ASML', 'AVGO', 'AXP',
@@ -46,7 +45,6 @@ def run_optimized_scan(tickers, pattern, market_cap_limit):
         progress_bar.progress(min(i / total_tickers, 1.0), text=f"Analyzing setups {i}/{total_tickers}...")
         
         try:
-            # Download a 30-day structural daily candle batch
             history = yf.download(chunk, period="30d", interval="1d", group_by='ticker', progress=False)
             
             for t in chunk:
@@ -62,28 +60,23 @@ def run_optimized_scan(tickers, pattern, market_cap_limit):
                 if len(close_prices) == 0 or np.isnan(close_prices[-1]):
                     continue
                 
-                recent_closes = close_prices[-5:]   # Sideways consolidation window
-                older_closes = close_prices[-20:-5]  # Momentum trend window
+                recent_closes = close_prices[-5:]
+                older_closes = close_prices[-20:-5]
                 
-                # REAL-WORLD BULL FLAG LOGIC
                 if pattern == "Bull Flag / Consolidation":
                     prior_return = (older_closes[-1] - older_closes[0]) / older_closes[0]
                     recent_std = np.std(recent_closes) / np.mean(recent_closes)
-                    # Prior solid upward trend with subsequent tight trading range
                     if prior_return > 0.025 and recent_std < 0.025:
                         matches.append({'Ticker': t, 'Price': close_prices[-1], 'History': close_prices[-7:].tolist()})
                         
-                # HIGH VOLATILITY BREAKOUT LOGIC
                 elif pattern == "High Volatility Breakout":
                     today_return = abs((close_prices[-1] - close_prices[-2]) / close_prices[-2])
                     historical_std = np.std(close_prices[-20:-1]) / np.mean(close_prices[-20:-1])
                     avg_volume = np.mean(volumes[-20:-1])
                     
-                    # Exploding on outsized volume spikes
                     if today_return > (historical_std * 1.8) and volumes[-1] > (avg_volume * 1.3):
                         matches.append({'Ticker': t, 'Price': close_prices[-1], 'History': close_prices[-7:].tolist()})
                         
-                # BEAR FLAG LOGIC
                 elif pattern == "Bear Flag":
                     prior_return = (older_closes[-1] - older_closes[0]) / older_closes[0]
                     recent_std = np.std(recent_closes) / np.mean(recent_closes)
@@ -97,7 +90,6 @@ def run_optimized_scan(tickers, pattern, market_cap_limit):
     if not matches:
         return pd.DataFrame()
         
-    # Apply user metadata filtering purely to technical breakout hits
     final_rows = []
     for m in matches:
         try:
@@ -174,7 +166,8 @@ if selected_pattern != "None":
             st.markdown(f"## 📈 Long-Term Trend Analysis: {clicked_name} (`{clicked_ticker}`)")
             
             with st.spinner(f"Downloading 1-year candlestick profile..."):
-                df_year = yf.download(clicked_ticker, period="1y", interval="1d", progress=False)
+                # FIX INTEGRATED HERE: added multi_level_index=False to prevent ValueError format bugs
+                df_year = yf.download(clicked_ticker, period="1y", interval="1d", progress=False, multi_level_index=False)
                 if not df_year.empty:
                     df_year['50 MA'] = df_year['Close'].rolling(window=50).mean()
                     df_year['200 MA'] = df_year['Close'].rolling(window=200).mean()
