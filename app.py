@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
 
-# 1. HARDCODED OFFICIAL HIGH-GROWTH IBD 50 MARKET UNIVERSE
+# 1. HARDCODED OFFICIAL HIGH-GROWTH IBD 50 WATCH LIST
 @st.cache_data(ttl=86400)
 def load_ibd50_universe():
     tickers = [
@@ -18,35 +18,22 @@ def load_ibd50_universe():
     ]
     return sorted(list(set(tickers)))
 
-# 2. FIXED SCAN ENGINE (Hardlocked to 30 Days of price history for accurate pattern matching)
+# 2. DEFENSIVE SCAN ENGINE (Bypasses Multi-Index Batch Download Failures)
 def run_optimized_scan(all_tickers, pattern, market_cap_limit):
     if pattern == "None" or not all_tickers:
         return pd.DataFrame()
         
     matches = []
     progress_bar = st.progress(0, text="Synchronizing market matrices...")
-    
-    try:
-        # FIX: Hardlocked history download to 30d so pattern calculations are highly accurate
-        history = yf.download(all_tickers, period="30d", interval="1d", group_by='ticker', progress=False, multi_level_index=False)
-        batch_mode = True
-    except Exception:
-        batch_mode = False
-        
     total_tickers = len(all_tickers)
     
     for idx, t in enumerate(all_tickers):
         progress_bar.progress(min((idx + 1) / total_tickers, 1.0), text=f"Scanning IBD 50 charts {idx+1}/{total_tickers}...")
         
         try:
-            if batch_mode:
-                if t not in history.columns.levels[0]:
-                    continue
-                df_stock = history[t].dropna()
-            else:
-                df_stock = yf.download(t, period="30d", interval="1d", progress=False, multi_level_index=False).dropna()
-                
-            if len(df_stock) < 20:
+            # FIX: Pulling clean single-level histories individually to completely avoid column lookup skips
+            df_stock = yf.download(t, period="30d", interval="1d", progress=False, multi_level_index=False)
+            if df_stock.empty or len(df_stock) < 20:
                 continue
                 
             close_prices = df_stock['Close'].values
@@ -97,7 +84,7 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
             
     return pd.DataFrame(final_rows)
 
-# 3. 1-YEAR WIDE SPARKLINE GENERATOR (Maintains independent 1y context window)
+# 3. 1-YEAR WIDE SPARKLINE GENERATOR (Maintains stable single-column layout)
 def draw_wide_trendline(ticker_symbol):
     df_mini = yf.download(ticker_symbol, period="1y", interval="1d", progress=False, multi_level_index=False)
     if df_mini.empty:
@@ -122,7 +109,7 @@ def draw_wide_trendline(ticker_symbol):
 target_view = st.query_params.get("view_ticker", None)
 
 if target_view is not None:
-    # --- PAGE 1: FULLY INTERACTIVE DEEP-DIVE VIEW ---
+    # --- PAGE 1: INTERACTIVE DEEP-DIVE CANDLESTICK CHART ---
     if st.button("⬅️ Back to IBD 50 List"):
         st.query_params.clear()
         st.rerun()
@@ -152,7 +139,7 @@ if target_view is not None:
             st.plotly_chart(fig, use_container_width=True, config={'staticPlot': False, 'scrollZoom': True, 'displayModeBar': True})
 
 else:
-    # --- PAGE 2: MAIN SINGLE-COLUMN DASHBOARD VIEW ---
+    # --- PAGE 2: MAIN HOME DASHBOARD ---
     st.write("## 🔍 Visual IBD 50 Chart Pattern Screener")
     list_of_tickers = load_ibd50_universe()
     
