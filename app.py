@@ -18,7 +18,7 @@ def load_ibd50_universe():
     ]
     return sorted(list(set(tickers)))
 
-# 2. FAIL-SAFE SCAN ENGINE
+# 2. FIXED SCAN ENGINE (Hardlocked to 30 Days of price history for accurate pattern matching)
 def run_optimized_scan(all_tickers, pattern, market_cap_limit):
     if pattern == "None" or not all_tickers:
         return pd.DataFrame()
@@ -27,6 +27,7 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
     progress_bar = st.progress(0, text="Synchronizing market matrices...")
     
     try:
+        # FIX: Hardlocked history download to 30d so pattern calculations are highly accurate
         history = yf.download(all_tickers, period="30d", interval="1d", group_by='ticker', progress=False, multi_level_index=False)
         batch_mode = True
     except Exception:
@@ -96,7 +97,7 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
             
     return pd.DataFrame(final_rows)
 
-# 3. 1-YEAR WIDE SPARKLINE GENERATOR (STABLE SCROLLING)
+# 3. 1-YEAR WIDE SPARKLINE GENERATOR (Maintains independent 1y context window)
 def draw_wide_trendline(ticker_symbol):
     df_mini = yf.download(ticker_symbol, period="1y", interval="1d", progress=False, multi_level_index=False)
     if df_mini.empty:
@@ -142,14 +143,12 @@ if target_view is not None:
             fig.add_trace(go.Scatter(x=df_year.index, y=df_year['50 MA'], line=dict(color='orange', width=1.5), name='50-Day SMA'))
             fig.add_trace(go.Scatter(x=df_year.index, y=df_year['200 MA'], line=dict(color='red', width=2.0), name='200-Day SMA'))
             
-            # RE-ACTIVATED INTERACTIVITY: dragmode is set to pan, allowing chart movement
             fig.update_layout(
                 height=550, xaxis_rangeslider_visible=False,
                 margin=dict(l=10, r=10, t=20, b=10),
                 legend=dict(orientation="h", y=1.08, x=0),
                 dragmode="pan"
             )
-            # RE-ACTIVATED INTERACTIVITY: displayModeBar and scrollZoom are turned on
             st.plotly_chart(fig, use_container_width=True, config={'staticPlot': False, 'scrollZoom': True, 'displayModeBar': True})
 
 else:
@@ -183,7 +182,6 @@ else:
         if not screened_matches.empty:
             st.write("#### 📈 1-Year Structural Trend Profiles")
             
-            # Render each stock in a beautiful, stacked single-column card layout
             for idx, row_data in screened_matches.iterrows():
                 ticker_target = row_data['Ticker']
                 company_name = row_data['Company']
@@ -192,7 +190,6 @@ else:
                 with st.container(border=True):
                     col_left, col_right = st.columns([4, 1])
                     with col_left:
-                        # Static 1-year macro snapshot to ensure stable mobile scrolling
                         fig_thumb = draw_wide_trendline(ticker_target)
                         if fig_thumb:
                             st.plotly_chart(fig_thumb, use_container_width=True, config={'staticPlot': True})
@@ -205,4 +202,3 @@ else:
                             st.rerun()
         else:
             st.warning("No IBD 50 stocks are hitting this specific math layout today. Try adjusting your settings or selection criteria.")
-        
