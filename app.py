@@ -18,7 +18,7 @@ def load_ibd50_universe():
     ]
     return sorted(list(set(tickers)))
 
-# 2. DEFENSIVE SCAN ENGINE (With Multi-Index Normalization)
+# 2. DEFENSIVE SCAN ENGINE (Extracts numbers using raw dictionary parsing to bypass column issues)
 def run_optimized_scan(all_tickers, pattern, market_cap_limit):
     if pattern == "None" or not all_tickers:
         return pd.DataFrame()
@@ -32,18 +32,17 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
         
         try:
             df_stock = yf.download(t, period="30d", interval="1d", progress=False)
-            if df_stock.empty:
+            if df_stock.empty or len(df_stock) < 20:
                 continue
                 
-            # FIX: Safely flatten multi-level headers if yfinance forces them
-            if isinstance(df_stock.columns, pd.MultiIndex):
-                df_stock.columns = df_stock.columns.get_level_values(0)
-                
+            # FIX: Force clean flat string arrays on the columns regardless of MultiIndex status
+            if hasattr(df_stock.columns, 'get_level_values'):
+                df_stock.columns = [str(col[0] if isinstance(col, tuple) else col) for col in df_stock.columns]
+            
             df_stock = df_stock.dropna()
-            if len(df_stock) < 20:
-                continue
-                
-            close_prices = df_stock['Close'].values
+            
+            # FIX: Use absolute location arrays (.loc) to extract pure numerical arrays
+            close_prices = df_stock.loc[:, 'Close'].to_numpy().flatten()
             if len(close_prices) == 0 or np.isnan(close_prices[-1]):
                 continue
             
@@ -53,7 +52,6 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
             if pattern == "Bull Flag / Consolidation":
                 prior_return = (older_closes[-1] - older_closes[0]) / older_closes[0]
                 recent_std = np.std(recent_closes) / np.mean(recent_closes)
-                # Standardized baseline window parameters for accurate technical scanning
                 if prior_return > 0.025 and recent_std < 0.035:
                     matches.append(t)
                     
@@ -82,29 +80,32 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
             info = yf.Ticker(ticker).info
             mc_billions = round(info.get('marketCap', 0) / 1_000_000_000, 2)
             if mc_billions >= market_cap_limit:
+                # Fallbacks to prevent missing key fields from dropping rows
+                current_p = info.get('currentPrice') or info.get('regularMarketPrice') or 0
                 final_rows.append({
                     'Ticker': ticker,
                     'Company': info.get('longName', ticker),
-                    'Price': info.get('currentPrice', 0)
+                    'Price': current_p
                 })
         except Exception:
             continue
             
     return pd.DataFrame(final_rows)
 
-# 3. 1-YEAR WIDE SPARKLINE GENERATOR (With Multi-Index Normalization)
+# 3. 1-YEAR WIDE SPARKLINE GENERATOR (With pure numeric array conversion)
 def draw_wide_trendline(ticker_symbol):
     df_mini = yf.download(ticker_symbol, period="1y", interval="1d", progress=False)
     if df_mini.empty:
         return None
         
-    # FIX: Flatten header to ensure data extraction doesn't turn up blank
-    if isinstance(df_mini.columns, pd.MultiIndex):
-        df_mini.columns = df_mini.columns.get_level_values(0)
+    if hasattr(df_mini.columns, 'get_level_values'):
+        df_mini.columns = [str(col[0] if isinstance(col, tuple) else col) for col in df_mini.columns]
         
+    close_vals = df_mini.loc[:, 'Close'].to_numpy().flatten()
+    
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=df_mini.index, y=df_mini['Close'],
+        x=df_mini.index, y=close_vals,
         line=dict(color='#00FFCC', width=1.8),
         mode='lines'
     ))
@@ -131,77 +132,15 @@ if target_view is not None:
     with st.spinner("Generating 1-year candlestick framework..."):
         df_year = yf.download(target_view, period="1y", interval="1d", progress=False)
         if not df_year.empty:
-            # FIX: Flatten header arrays for the technical moving averages calculation block
-            if isinstance(df_year.columns, pd.MultiIndex):
-                df_year.columns = df_year.columns.get_level_values(0)
+            if hasattr(df_year.columns, 'get_level_values'):
+                df_year.columns = [str(col[0] if isinstance(col, tuple) else col) for col in df_year.columns]
                 
-            df_year['50 MA'] = df_year['Close'].rolling(window=50).mean()
-            df_year['200 MA'] = df_year['Close'].rolling(window=200).mean()
+            close_y = df_year.loc[:, 'Close'].to_numpy().flatten()
+            open_y = df_year.loc[:, 'Open'].to_numpy().flatten()
+            high_y = df_year.loc[:, 'High'].to_numpy().flatten()
+            low_y = df_year.loc[:, 'Low'].to_numpy().flatten()
             
-            fig = go.Figure()
-            fig.add_trace(go.Candlestick(
-                x=df_year.index, open=df_year['Open'], high=df_year['High'],
-                low=df_year['Low'], close=df_year['Close'], name='Price'
-            ))
-            fig.add_trace(go.Scatter(x=df_year.index, y=df_year['50 MA'], line=dict(color='orange', width=1.5), name='50-Day SMA'))
-            fig.add_trace(go.Scatter(x=df_year.index, y=df_year['200 MA'], line=dict(color='red', width=2.0), name='200-Day SMA'))
-            
-            fig.update_layout(
-                height=550, xaxis_rangeslider_visible=False,
-                margin=dict(l=10, r=10, t=20, b=10),
-                legend=dict(orientation="h", y=1.08, x=0),
-                dragmode="pan"
-            )
-            st.plotly_chart(fig, use_container_width=True, config={'staticPlot': False, 'scrollZoom': True, 'displayModeBar': True})
-
-else:
-    # --- PAGE 2: MAIN SINGLE-COLUMN DASHBOARD VIEW ---
-    st.write("## 🔍 Visual IBD 50 Chart Pattern Screener")
-    list_of_tickers = load_ibd50_universe()
-    
-    min_market_cap = st.slider("Market Cap Threshold", min_value=0, max_value=500, value=0, step=5, format="$%d B")
-    
-    st.markdown("---")
-    col1, col2 = st.columns(2)
-    with col1:
-        pattern_cont = st.radio("Continuation Setups:", ["None", "Bull Flag / Consolidation", "Bear Flag"])
-    with col2:
-        pattern_bil = st.radio("Breakout Setups:", ["None", "High Volatility Breakout"])
-        
-    selected_pattern = "None"
-    for p in [pattern_cont, pattern_bil]:
-        if p != "None":
-            selected_pattern = p
-            
-    if selected_pattern != "None":
-        st.markdown(f"### 📊 Active IBD 50 Setups for: **{selected_pattern}**")
-        
-        state_key = f"ibd50_results_{selected_pattern}_{min_market_cap}"
-        if state_key not in st.session_state:
-            st.session_state[state_key] = run_optimized_scan(list_of_tickers, selected_pattern, min_market_cap)
-            
-        screened_matches = st.session_state[state_key]
-        
-        if not screened_matches.empty:
-            st.write("#### 📈 1-Year Structural Trend Profiles")
-            
-            for idx, row_data in screened_matches.iterrows():
-                ticker_target = row_data['Ticker']
-                company_name = row_data['Company']
-                price_val = row_data['Price']
-                
-                with st.container(border=True):
-                    col_left, col_right = st.columns([4, 1])
-                    with col_left:
-                        fig_thumb = draw_wide_trendline(ticker_target)
-                        if fig_thumb:
-                            st.plotly_chart(fig_thumb, use_container_width=True, config={'staticPlot': True})
-                    with col_right:
-                        st.markdown(f"### **{ticker_target}**")
-                        st.markdown(f"`${price_val:.2f}`")
-                        st.caption(company_name)
-                        if st.button(f"Zoom", key=f"zoom_nav_{ticker_target}", use_container_width=True):
-                            st.query_params["view_ticker"] = ticker_target
-                            st.rerun()
-        else:
-            st.warning("No IBD 50 stocks are hitting this specific math layout today. Try adjusting your settings or selection criteria.")
+            df_year_flat = pd.DataFrame(index=df_year.index)
+            df_year_flat['Close'] = close_y
+            df_year_flat['50 MA'] = df_year_flat['Close'].rolling(window=50).mean()
+            df_year_flat['200 MA'] = df
