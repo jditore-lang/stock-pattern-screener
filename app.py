@@ -6,6 +6,26 @@ import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
 
+# Inject Custom CSS to force columns to stay side-by-side in 2 columns on mobile portrait view
+st.markdown("""
+<style>
+    /* Forces columns inside a block to maintain equal 2-column widths on small screens */
+    [data-testid="stHorizontalBlock"] {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: wrap !important;
+        width: 100% !important;
+    }
+    [data-testid="stHorizontalBlock"] > div {
+        flex: 1 1 calc(50% - 10px) !important;
+        min-width: calc(50% - 10px) !important;
+        max-width: calc(50% - 10px) !important;
+    }
+    /* Shrinks whitespace padding for higher density on phone layouts */
+    div.block-container { padding-top: 1.5rem; padding-bottom: 1rem; }
+</style>
+""", unsafe_allow_html=True)
+
 # 1. DOWNLOAD A LIQUID, HIGH-VOLUME MARKET UNIVERSE
 @st.cache_data(ttl=86400)
 def load_liquid_universe():
@@ -92,4 +112,135 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
         try:
             info = yf.Ticker(ticker).info
             mc_billions = round(info.get('marketCap', 0) / 1_000_000_000, 2)
-            if mc_billions >= market_cap_
+            if mc_billions >= market_cap_limit:
+                final_rows.append({
+                    'Ticker': ticker,
+                    'Company': info.get('longName', ticker),
+                    'Price': info.get('currentPrice', 0)
+                })
+        except Exception:
+            continue
+            
+    return pd.DataFrame(final_rows)
+
+# 3. HIGH-DENSITY MINI CANDLESTICK GENERATOR
+def draw_mini_candlestick(ticker_symbol):
+    df_mini = yf.download(ticker_symbol, period="15d", interval="1d", progress=False, multi_level_index=False)
+    if df_mini.empty:
+        return None
+        
+    fig = go.Figure()
+    fig.add_trace(go.Candlestick(
+        x=df_mini.index,
+        open=df_mini['Open'], high=df_mini['High'],
+        low=df_mini['Low'], close=df_mini['Close'],
+        increasing_line_color='#00FFCC', decreasing_line_color='#FF3366',
+        line_width=1.5
+    ))
+    fig.update_layout(
+        height=100,
+        margin=dict(l=2, r=2, t=2, b=2),
+        xaxis=dict(visible=False, showgrid=False),
+        yaxis=dict(visible=False, showgrid=False),
+        showlegend=False, dragmode=False, template="plotly_dark",
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
+    )
+    return fig
+
+# --- NAVIGATION CONTROLLER ---
+query_params = st.query_params
+
+if "view_ticker" in query_params:
+    # --- DEEP-DIVE FULL CHART VIEW ---
+    selected_ticker = query_params["view_ticker"]
+    
+    if st.button("⬅️ Back to Miniature Grid"):
+        st.query_params.clear()
+        st.rerun()
+        
+    st.markdown(f"## 📊 Candlestick Trend Profile: `{selected_ticker}`")
+    
+    with st.spinner("Generating 1-year candlestick framework..."):
+        df_year = yf.download(selected_ticker, period="1y", interval="1d", progress=False, multi_level_index=False)
+        if not df_year.empty:
+            df_year['50 MA'] = df_year['Close'].rolling(window=50).mean()
+            df_year['200 MA'] = df_year['Close'].rolling(window=200).mean()
+            
+            fig = go.Figure()
+            fig.add_trace(go.Candlestick(
+                x=df_year.index, open=df_year['Open'], high=df_year['High'],
+                low=df_year['Low'], close=df_year['Close'], name='Price'
+            ))
+            fig.add_trace(go.Scatter(x=df_year.index, y=df_year['50 MA'], line=dict(color='orange', width=1.5), name='50-Day SMA'))
+            fig.add_trace(go.Scatter(x=df_year.index, y=df_year['200 MA'], line=dict(color='red', width=2.0), name='200-Day SMA'))
+            
+            fig.update_layout(
+                height=550, xaxis_rangeslider_visible=False,
+                margin=dict(l=10, r=10, t=20, b=10),
+                legend=dict(orientation="h", y=1.08, x=0),
+                dragmode=False
+            )
+            st.plotly_chart(fig, use_container_width=True, config={'staticPlot': False, 'scrollZoom': False, 'displayModeBar': False})
+
+else:
+    # --- MASTER SCREENER DASHBOARD VIEW ---
+    st.write("## 🔍 Visual Chart Pattern Screener")
+    list_of_tickers = load_liquid_universe()
+    
+    min_market_cap = st.slider("Market Cap Threshold", min_value=0, max_value=500, value=10, step=5, format="$%d B")
+    
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+    with col1:
+        pattern_cont = st.radio("Continuation Setups:", ["None", "Bull Flag / Consolidation", "Bear Flag"])
+    with col2:
+        pattern_bil = st.radio("Breakout Setups:", ["None", "High Volatility Breakout"])
+        
+    selected_pattern = "None"
+    for p in [pattern_cont, pattern_bil]:
+        if p != "None":
+            selected_pattern = p
+            
+    if selected_pattern != "None":
+        st.markdown(f"### 📊 Active Structural Setups for: **{selected_pattern}**")
+        
+        state_key = f"results_{selected_pattern}_{min_market_cap}"
+        if state_key not in st.session_state:
+            st.session_state[state_key] = run_optimized_scan(list_of_tickers, selected_pattern, min_market_cap)
+            
+        screened_matches = st.session_state[state_key]
+        
+        if not screened_matches.empty:
+            # Render items systematically in pairs using pure Python native layouts
+            for idx in range(0, len(screened_matches), 2):
+                grid_cols = st.columns(2)
+                
+                # Column 1
+                if idx < len(screened_matches):
+                    row_data = screened_matches.iloc[idx]
+                    with grid_cols[0]:
+                        with st.container(border=True):
+                            st.markdown(f"**{row_data['Ticker']}** | ${row_data['Price']:.2f}")
+                            fig_thumb = draw_mini_candlestick(row_data['Ticker'])
+                            if fig_thumb:
+                                st.plotly_chart(fig_thumb, use_container_width=True, config={'staticPlot': True})
+                            if st.button(f"Zoom", key=f"btn_{row_data['Ticker']}", use_container_width=True):
+                                st.query_params.view_ticker = row_data['Ticker']
+                                st.rerun()
+                                
+                # Column 2
+                if (idx + 1) < len(screened_matches):
+                    row_data = screened_matches.iloc[idx + 1]
+                    with grid_cols[1]:
+                        with st.container(border=True):
+                            st.markdown(f"**{row_data['Ticker']}** | ${row_data['Price']:.2f}")
+                            fig_thumb = draw_mini_candlestick(row_data['Ticker'])
+                            if fig_thumb:
+                                st.plotly_chart(fig_thumb, use_container_width=True, config={'staticPlot': True})
+                            if st.button(f"Zoom", key=f"btn_{row_data['Ticker']}", use_container_width=True):
+                                st.query_params.view_ticker = row_data['Ticker']
+                                st.rerun()
+        else:
+            st.warning("No highly liquid stocks are hitting this strict math baseline today.")
+else:
+    st.info("Select a chart pattern strategy above to initiate the visual scan grid.")
