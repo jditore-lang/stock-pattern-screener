@@ -18,7 +18,7 @@ def load_ibd50_universe():
     ]
     return sorted(list(set(tickers)))
 
-# 2. DEFENSIVE SCAN ENGINE (Forces clean 1D float vectors to bypass extraction errors)
+# 2. DEFENSIVE SCAN ENGINE (Forces extraction of absolute unboxed raw numeric float vectors)
 def run_optimized_scan(all_tickers, pattern, market_cap_limit):
     if pattern == "None" or not all_tickers:
         return pd.DataFrame()
@@ -35,7 +35,7 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
             if df_stock.empty or len(df_stock) < 20:
                 continue
                 
-            # FIX: Cleanly normalizes multi-index structures to flat strings
+            # FIX: Convert multi-level headers to flat clean text labels immediately
             if isinstance(df_stock.columns, pd.MultiIndex):
                 df_stock.columns = [str(c[0]) for c in df_stock.columns]
             else:
@@ -43,8 +43,8 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
             
             df_stock = df_stock.dropna()
             
-            # FIX: Forces extraction of direct 1D float vectors to fix math evaluation
-            close_prices = df_stock['Close'].astype(float).values.flatten()
+            # FIX: Unpack into raw 1D numpy float arrays to guarantee math formulas parse cleanly
+            close_prices = df_stock['Close'].to_numpy().flatten().astype(float)
             if len(close_prices) == 0 or np.isnan(close_prices[-1]):
                 continue
             
@@ -82,18 +82,19 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
             info = yf.Ticker(ticker).info
             mc_billions = round(info.get('marketCap', 0) / 1_000_000_000, 2)
             if mc_billions >= market_cap_limit:
+                # Direct dictionary extraction with absolute numeric safe-fallbacks
                 current_p = info.get('currentPrice') or info.get('regularMarketPrice') or 0
                 final_rows.append({
                     'Ticker': ticker,
                     'Company': info.get('longName', ticker),
-                    'Price': current_p
+                    'Price': float(current_p)
                 })
         except Exception:
             continue
             
     return pd.DataFrame(final_rows)
 
-# 3. 1-YEAR WIDE SPARKLINE GENERATOR
+# 3. 1-YEAR WIDE SPARKLINE GENERATOR (Forces unboxed text extraction vectors)
 def draw_wide_trendline(ticker_symbol):
     df_mini = yf.download(ticker_symbol, period="1y", interval="1d", progress=False)
     if df_mini.empty:
@@ -104,7 +105,7 @@ def draw_wide_trendline(ticker_symbol):
     else:
         df_mini.columns = [str(c) for c in df_mini.columns]
         
-    close_vals = df_mini['Close'].astype(float).values.flatten()
+    close_vals = df_mini['Close'].to_numpy().flatten().astype(float)
     
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -140,10 +141,10 @@ if target_view is not None:
             else:
                 df_year.columns = [str(c) for c in df_year.columns]
                 
-            close_y = df_year['Close'].astype(float).values.flatten()
-            open_y = df_year['Open'].astype(float).values.flatten()
-            high_y = df_year['High'].astype(float).values.flatten()
-            low_y = df_year['Low'].astype(float).values.flatten()
+            close_y = df_year['Close'].to_numpy().flatten().astype(float)
+            open_y = df_year['Open'].to_numpy().flatten().astype(float)
+            high_y = df_year['High'].to_numpy().flatten().astype(float)
+            low_y = df_year['Low'].to_numpy().flatten().astype(float)
             
             df_year_flat = pd.DataFrame(index=df_year.index)
             df_year_flat['Close'] = close_y
