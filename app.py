@@ -6,23 +6,18 @@ import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
 
-# Inject Custom CSS to force columns to stay side-by-side in 2 columns on mobile portrait view
+# Inject safe structural CSS targeting explicit column containers to bypass structural crashes
 st.markdown("""
 <style>
-    /* Forces columns inside a block to maintain equal 2-column widths on small screens */
-    [data-testid="stHorizontalBlock"] {
-        display: flex !important;
-        flex-direction: row !important;
-        flex-wrap: wrap !important;
-        width: 100% !important;
+    /* Force columns to stick strictly to 50% width on small phone viewports */
+    [data-testid="column"] {
+        width: calc(50% - 8px) !important;
+        flex: 1 1 calc(50% - 8px) !important;
+        min-width: calc(50% - 8px) !important;
     }
-    [data-testid="stHorizontalBlock"] > div {
-        flex: 1 1 calc(50% - 10px) !important;
-        min-width: calc(50% - 10px) !important;
-        max-width: calc(50% - 10px) !important;
-    }
-    /* Shrinks whitespace padding for higher density on phone layouts */
+    /* Compact the display padding gaps for premium high-density scannability */
     div.block-container { padding-top: 1.5rem; padding-bottom: 1rem; }
+    [data-testid="stMetricValue"] { font-size: 1.25rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -211,11 +206,11 @@ else:
         screened_matches = st.session_state[state_key]
         
         if not screened_matches.empty:
-            # Render items systematically in pairs using pure Python native layouts
+            # Pair items into native layout rows cleanly
             for idx in range(0, len(screened_matches), 2):
                 grid_cols = st.columns(2)
                 
-                # Column 1
+                # Box A
                 if idx < len(screened_matches):
                     row_data = screened_matches.iloc[idx]
                     with grid_cols[0]:
@@ -228,7 +223,7 @@ else:
                                 st.query_params.view_ticker = row_data['Ticker']
                                 st.rerun()
                                 
-                # Column 2
+                # Box B
                 if (idx + 1) < len(screened_matches):
                     row_data = screened_matches.iloc[idx + 1]
                     with grid_cols[1]:
