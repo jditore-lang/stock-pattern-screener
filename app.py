@@ -18,7 +18,7 @@ def load_ibd50_universe():
     ]
     return sorted(list(set(tickers)))
 
-# 2. DEFENSIVE SCAN ENGINE (Bypasses Multi-Index Batch Download Failures)
+# 2. DEFENSIVE SCAN ENGINE (Uses standard cross-sections to safely handle multi-level columns)
 def run_optimized_scan(all_tickers, pattern, market_cap_limit):
     if pattern == "None" or not all_tickers:
         return pd.DataFrame()
@@ -31,9 +31,19 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
         progress_bar.progress(min((idx + 1) / total_tickers, 1.0), text=f"Scanning IBD 50 charts {idx+1}/{total_tickers}...")
         
         try:
-            # FIX: Pulling clean single-level histories individually to completely avoid column lookup skips
-            df_stock = yf.download(t, period="30d", interval="1d", progress=False, multi_level_index=False)
-            if df_stock.empty or len(df_stock) < 20:
+            # FIX: Removed multi_level_index=False parameter to bypass server data truncation
+            raw_data = yf.download(t, period="30d", interval="1d", progress=False)
+            if raw_data.empty:
+                continue
+                
+            # FIX: Safely flatten the columns if yfinance returns a multi-index block
+            if isinstance(raw_data.columns, pd.MultiIndex):
+                df_stock = raw_data.xs(t, axis=1, level=1) if t in raw_data.columns.levels[1] else raw_data.copy()
+            else:
+                df_stock = raw_data.copy()
+                
+            df_stock = df_stock.dropna()
+            if len(df_stock) < 20:
                 continue
                 
             close_prices = df_stock['Close'].values
@@ -84,11 +94,16 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
             
     return pd.DataFrame(final_rows)
 
-# 3. 1-YEAR WIDE SPARKLINE GENERATOR (Maintains stable single-column layout)
+# 3. 1-YEAR WIDE SPARKLINE GENERATOR
 def draw_wide_trendline(ticker_symbol):
-    df_mini = yf.download(ticker_symbol, period="1y", interval="1d", progress=False, multi_level_index=False)
-    if df_mini.empty:
+    raw_data = yf.download(ticker_symbol, period="1y", interval="1d", progress=False)
+    if raw_data.empty:
         return None
+        
+    if isinstance(raw_data.columns, pd.MultiIndex):
+        df_mini = raw_data.xs(ticker_symbol, axis=1, level=1) if ticker_symbol in raw_data.columns.levels[1] else raw_data.copy()
+    else:
+        df_mini = raw_data.copy()
         
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -109,7 +124,7 @@ def draw_wide_trendline(ticker_symbol):
 target_view = st.query_params.get("view_ticker", None)
 
 if target_view is not None:
-    # --- PAGE 1: INTERACTIVE DEEP-DIVE CANDLESTICK CHART ---
+    # --- PAGE 1: FULLY INTERACTIVE DEEP-DIVE VIEW ---
     if st.button("⬅️ Back to IBD 50 List"):
         st.query_params.clear()
         st.rerun()
@@ -117,8 +132,13 @@ if target_view is not None:
     st.markdown(f"## 📊 Candlestick Trend Profile: `{target_view}`")
     
     with st.spinner("Generating 1-year candlestick framework..."):
-        df_year = yf.download(target_view, period="1y", interval="1d", progress=False, multi_level_index=False)
-        if not df_year.empty:
+        raw_data = yf.download(target_view, period="1y", interval="1d", progress=False)
+        if not raw_data.empty:
+            if isinstance(raw_data.columns, pd.MultiIndex):
+                df_year = raw_data.xs(target_view, axis=1, level=1) if target_view in raw_data.columns.levels[1] else raw_data.copy()
+            else:
+                df_year = raw_data.copy()
+                
             df_year['50 MA'] = df_year['Close'].rolling(window=50).mean()
             df_year['200 MA'] = df_year['Close'].rolling(window=200).mean()
             
@@ -139,7 +159,7 @@ if target_view is not None:
             st.plotly_chart(fig, use_container_width=True, config={'staticPlot': False, 'scrollZoom': True, 'displayModeBar': True})
 
 else:
-    # --- PAGE 2: MAIN HOME DASHBOARD ---
+    # --- PAGE 2: MAIN SINGLE-COLUMN DASHBOARD VIEW ---
     st.write("## 🔍 Visual IBD 50 Chart Pattern Screener")
     list_of_tickers = load_ibd50_universe()
     
