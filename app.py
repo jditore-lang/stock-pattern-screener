@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
 
-# 1. DOWNLOAD A LIQUID, HIGH-VOLUME MARKET UNIVERSE ACROSS THE ENTIRE ALPHABET
+# 1. DOWNLOAD A LIQUID, HIGH-VOLUME MARKET UNIVERSE
 @st.cache_data(ttl=86400)
 def load_liquid_universe():
     tickers = [
@@ -30,7 +30,7 @@ def load_liquid_universe():
     ]
     return sorted(list(set(tickers)))
 
-# 2. OPTIMIZED HIGH-SPEED SCAN ENGINE
+# 2. BACKEND SCAN ENGINE
 def run_optimized_scan(all_tickers, pattern, market_cap_limit):
     if pattern == "None" or not all_tickers:
         return pd.DataFrame()
@@ -56,8 +56,6 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
                     continue
                     
                 close_prices = df_stock['Close'].values
-                volumes = df_stock['Volume'].values
-                
                 if len(close_prices) == 0 or np.isnan(close_prices[-1]):
                     continue
                 
@@ -68,21 +66,19 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
                     prior_return = (older_closes[-1] - older_closes[0]) / older_closes[0]
                     recent_std = np.std(recent_closes) / np.mean(recent_closes)
                     if prior_return > 0.025 and recent_std < 0.025:
-                        matches.append({'Ticker': t, 'Price': close_prices[-1], 'History': close_prices[-7:].tolist()})
+                        matches.append(t)
                         
                 elif pattern == "High Volatility Breakout":
                     today_return = abs((close_prices[-1] - close_prices[-2]) / close_prices[-2])
                     historical_std = np.std(close_prices[-20:-1]) / np.mean(close_prices[-20:-1])
-                    avg_volume = np.mean(volumes[-20:-1])
-                    
-                    if today_return > (historical_std * 1.8) and volumes[-1] > (avg_volume * 1.3):
-                        matches.append({'Ticker': t, 'Price': close_prices[-1], 'History': close_prices[-7:].tolist()})
+                    if today_return > (historical_std * 1.8):
+                        matches.append(t)
                         
                 elif pattern == "Bear Flag":
                     prior_return = (older_closes[-1] - older_closes[0]) / older_closes[0]
                     recent_std = np.std(recent_closes) / np.mean(recent_closes)
                     if prior_return < -0.025 and recent_std < 0.025:
-                        matches.append({'Ticker': t, 'Price': close_prices[-1], 'History': close_prices[-7:].tolist()})
+                        matches.append(t)
                         
         except Exception:
             continue
@@ -92,126 +88,131 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
         return pd.DataFrame()
         
     final_rows = []
-    for m in matches:
+    for ticker in matches:
         try:
-            info = yf.Ticker(m['Ticker']).info
-            mc_bytes = info.get('marketCap', 0)
-            mc_billions = round(mc_bytes / 1_000_000_000, 2) if mc_bytes else 0
-            
+            info = yf.Ticker(ticker).info
+            mc_billions = round(info.get('marketCap', 0) / 1_000_000_000, 2)
             if mc_billions >= market_cap_limit:
-                yesterday = m['History'][-2] if len(m['History']) > 1 else m['Price']
-                chg_pct = round(((m['Price'] - yesterday) / yesterday) * 100, 2)
-                
                 final_rows.append({
-                    'Ticker': m['Ticker'],
-                    'Company': info.get('longName', m['Ticker']),
-                    'Exchange': info.get('exchange', 'NYSE/NASDAQ'),
-                    'MarketCap': mc_billions,
-                    'Price': m['Price'],
-                    'Daily Change %': chg_pct,
-                    '7D Trend': m['History']
+                    'Ticker': ticker,
+                    'Company': info.get('longName', ticker),
+                    'Price': info.get('currentPrice', 0)
                 })
         except Exception:
             continue
             
     return pd.DataFrame(final_rows)
 
-# --- WEB APPLICATION INTERFACE ---
-st.write("## 🔍 Technical Analysis Chart Pattern Screener")
-list_of_tickers = load_liquid_universe()
+# Helper to draw clean thumbnail sparkline components
+def draw_thumbnail_chart(ticker_symbol):
+    df_mini = yf.download(ticker_symbol, period="30d", interval="1d", progress=False, multi_level_index=False)
+    if df_mini.empty:
+        return None
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df_mini.index, y=df_mini['Close'], line=dict(color='#00FFCC', width=2)))
+    fig.update_layout(
+        height=140, margin=dict(l=5, r=5, t=5, b=5),
+        xaxis=dict(visible=False), yaxis=dict(visible=False),
+        dragmode=False, template="plotly_dark"
+    )
+    return fig
 
-st.write("### Market Cap Threshold")
-min_market_cap = st.slider(
-    label="Slide to filter out smaller market cap stocks",
-    min_value=0, max_value=500, value=10, step=5, format="$%d B"
-)
+# --- NAVIGATION CONTROLLER VIA QUERY PARAMS ---
+# Detects whether the browser wants to show the full chart view or the screener dashboard
+query_params = st.query_params
 
-st.markdown("---")
-st.markdown("### Select Pattern Strategy")
-
-col1, col2 = st.columns(2)
-with col1:
-    pattern_cont = st.radio("Continuation Setups:", ["None", "Bull Flag / Consolidation", "Bear Flag"])
-with col2:
-    pattern_bil = st.radio("Breakout Setups:", ["None", "High Volatility Breakout"])
-
-selected_pattern = "None"
-for p in [pattern_cont, pattern_bil]:
-    if p != "None":
-        selected_pattern = p
-
-if selected_pattern != "None":
-    st.markdown(f"### 📊 Live Screen Results for: **{selected_pattern}**")
+if "view_ticker" in query_params:
+    # --- DEEP-DIVE FULL CHART VIEW ---
+    selected_ticker = query_params["view_ticker"]
     
-    state_key = f"results_{selected_pattern}_{min_market_cap}"
-    if state_key not in st.session_state:
-        st.session_state[state_key] = run_optimized_scan(list_of_tickers, selected_pattern, min_market_cap)
+    if st.button("⬅️ Back to Thumbnail Screener"):
+        st.query_params.clear()
+        st.rerun()
         
-    screened_matches = st.session_state[state_key]
+    st.markdown(f"## 📊 Candlestick Trend Profile: `{selected_ticker}`")
     
-    if not screened_matches.empty:
-        display_df = screened_matches.copy()
-        display_df['MarketCap'] = display_df['MarketCap'].apply(lambda x: f"${x:,.1f} B")
-        display_df['Price'] = display_df['Price'].apply(lambda x: f"${x:,.2f}")
-        display_df['Daily Change %'] = display_df['Daily Change %'].apply(lambda x: f"+{x}%" if x > 0 else f"{x}%")
-        
-        column_order = ["Ticker", "7D Trend", "Company", "Exchange", "MarketCap", "Price", "Daily Change %"]
-        
-        selected_rows = st.dataframe(
-            display_df, use_container_width=True, hide_index=True, column_order=column_order,
-            column_config={"7D Trend": st.column_config.LineChartColumn("7D Mini Chart")},
-            on_select="rerun", selection_mode="single-row"
-        )
-        
-        if selected_rows and selected_rows.selection.rows:
-            selected_index = selected_rows.selection.rows[0]
-            clicked_ticker = display_df.iloc[selected_index]["Ticker"]
-            clicked_name = display_df.iloc[selected_index]["Company"]
+    with st.spinner("Generating 1-year candlestick framework..."):
+        df_year = yf.download(selected_ticker, period="1y", interval="1d", progress=False, multi_level_index=False)
+        if not df_year.empty:
+            df_year['50 MA'] = df_year['Close'].rolling(window=50).mean()
+            df_year['200 MA'] = df_year['Close'].rolling(window=200).mean()
             
-            st.markdown("---")
-            st.markdown(f"## 📊 Candlestick Trend Profile: {clicked_name} (`{clicked_ticker}`)")
+            fig = go.Figure()
+            fig.add_trace(go.Candlestick(
+                x=df_year.index, open=df_year['Open'], high=df_year['High'],
+                low=df_year['Low'], close=df_year['Close'], name='Price'
+            ))
+            fig.add_trace(go.Scatter(x=df_year.index, y=df_year['50 MA'], line=dict(color='orange', width=1.5), name='50-Day SMA'))
+            fig.add_trace(go.Scatter(x=df_year.index, y=df_year['200 MA'], line=dict(color='red', width=2.0), name='200-Day SMA'))
             
-            with st.spinner(f"Generating 1-year candlestick framework..."):
-                df_year = yf.download(clicked_ticker, period="1y", interval="1d", progress=False, multi_level_index=False)
-                if not df_year.empty:
-                    df_year['50 MA'] = df_year['Close'].rolling(window=50).mean()
-                    df_year['200 MA'] = df_year['Close'].rolling(window=200).mean()
-                    
-                    fig = go.Figure()
-                    
-                    fig.add_trace(go.Candlestick(
-                        x=df_year.index,
-                        open=df_year['Open'],
-                        high=df_year['High'],
-                        low=df_year['Low'],
-                        close=df_year['Close'],
-                        name='Price Action'
-                    ))
-                    
-                    fig.add_trace(go.Scatter(
-                        x=df_year.index, y=df_year['50 MA'],
-                        line=dict(color='orange', width=1.5),
-                        name='50-Day SMA'
-                    ))
-                    
-                    fig.add_trace(go.Scatter(
-                        x=df_year.index, y=df_year['200 MA'],
-                        line=dict(color='red', width=2.0),
-                        name='200-Day SMA'
-                    ))
-                    
-                    fig.update_layout(
-                        height=500,
-                        xaxis_rangeslider_visible=False,
-                        margin=dict(l=10, r=10, t=20, b=10),
-                        legend=dict(orientation="h", y=1.08, x=0, xanchor="left"),
-                        # FIX: Disables mouse drag-zoom and touch-panning distortions completely
-                        dragmode=False
-                    )
-                    
-                    # FIX: Removes the interactive hover tool mode bar and blocks touch gestures from hijacking scrolling
-                    st.plotly_chart(fig, use_container_width=True, config={'staticPlot': False, 'scrollZoom': False, 'displayModeBar': False})
-    else:
-        st.warning("No highly liquid stocks are hitting this strict math baseline today. Try lowering your Market Cap Slider to allow mid-caps or check a different pattern strategy.")
+            fig.update_layout(
+                height=550, xaxis_rangeslider_visible=False,
+                margin=dict(l=10, r=10, t=20, b=10),
+                legend=dict(orientation="h", y=1.08, x=0),
+                dragmode=False
+            )
+            st.plotly_chart(fig, use_container_width=True, config={'staticPlot': False, 'scrollZoom': False, 'displayModeBar': False})
+
 else:
-    st.info("Select a chart pattern strategy above to initiate the data scan engine.")
+    # --- MASTER SCREENER DASHBOARD VIEW ---
+    st.write("## 🔍 Visual Chart Pattern Screener")
+    list_of_tickers = load_liquid_universe()
+    
+    min_market_cap = st.slider("Market Cap Threshold", min_value=0, max_value=500, value=10, step=5, format="$%d B")
+    
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+    with col1:
+        pattern_cont = st.radio("Continuation Setups:", ["None", "Bull Flag / Consolidation", "Bear Flag"])
+    with col2:
+        pattern_bil = st.radio("Breakout Setups:", ["None", "High Volatility Breakout"])
+        
+    selected_pattern = "None"
+    for p in [pattern_cont, pattern_bil]:
+        if p != "None":
+            selected_pattern = p
+            
+    if selected_pattern != "None":
+        st.markdown(f"### 📊 Active Structural Setups for: **{selected_pattern}**")
+        
+        state_key = f"results_{selected_pattern}_{min_market_cap}"
+        if state_key not in st.session_state:
+            st.session_state[state_key] = run_optimized_scan(list_of_tickers, selected_pattern, min_market_cap)
+            
+        screened_matches = st.session_state[state_key]
+        
+        if not screened_matches.empty:
+            # --- TWO-COLUMN GRID IMPLEMENTATION ---
+            # Loop through matches and render them cleanly in two alternating columns
+            for idx in range(0, len(screened_matches), 2):
+                grid_cols = st.columns(2)
+                
+                # Column A
+                if idx < len(screened_matches):
+                    row_data = screened_matches.iloc[idx]
+                    with grid_cols[0]:
+                        with st.container(border=True):
+                            st.markdown(f"**{row_data['Ticker']}** | ${row_data['Price']:.2f}")
+                            fig_thumb = draw_thumbnail_chart(row_data['Ticker'])
+                            if fig_thumb:
+                                st.plotly_chart(fig_thumb, use_container_width=True, config={'staticPlot': True})
+                            if st.button(f"View Full Chart", key=f"btn_{row_data['Ticker']}"):
+                                st.query_params.view_ticker = row_data['Ticker']
+                                st.rerun()
+                                
+                # Column B
+                if (idx + 1) < len(screened_matches):
+                    row_data = screened_matches.iloc[idx + 1]
+                    with grid_cols[1]:
+                        with st.container(border=True):
+                            st.markdown(f"**{row_data['Ticker']}** | ${row_data['Price']:.2f}")
+                            fig_thumb = draw_thumbnail_chart(row_data['Ticker'])
+                            if fig_thumb:
+                                st.plotly_chart(fig_thumb, use_container_width=True, config={'staticPlot': True})
+                            if st.button(f"View Full Chart", key=f"btn_{row_data['Ticker']}"):
+                                st.query_params.view_ticker = row_data['Ticker']
+                                st.rerun()
+        else:
+            st.warning("No highly liquid stocks are hitting this strict math baseline today.")
+    else:
+        st.info("Select a chart pattern strategy above to initiate the visual scan grid.")
