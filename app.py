@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
 
-# 1. DOWNLOAD A LIQUID, HIGH-VOLUME MARKET UNIVERSE
+# 1. LIQUID INSTITUTIONAL MARKET UNIVERSE
 @st.cache_data(ttl=86400)
 def load_liquid_universe():
     tickers = [
@@ -30,56 +30,63 @@ def load_liquid_universe():
     ]
     return sorted(list(set(tickers)))
 
-# 2. BACKEND SCAN ENGINE
+# 2. FAIL-SAFE SCAN ENGINE (Processes individually if batch endpoints lag)
 def run_optimized_scan(all_tickers, pattern, market_cap_limit):
     if pattern == "None" or not all_tickers:
         return pd.DataFrame()
         
     matches = []
-    progress_bar = st.progress(0, text="Downloading market data matrices...")
+    progress_bar = st.progress(0, text="Synchronizing market matrices...")
     
-    chunk_size = 40
+    # Attempt high-speed batch download first
+    try:
+        history = yf.download(all_tickers, period="30d", interval="1d", group_by='ticker', progress=False, multi_level_index=False)
+        batch_mode = True
+    except Exception:
+        batch_mode = False
+        
     total_tickers = len(all_tickers)
     
-    for i in range(0, total_tickers, chunk_size):
-        chunk = all_tickers[i:i+chunk_size]
-        progress_bar.progress(min(i / total_tickers, 1.0), text=f"Analyzing setups {i}/{total_tickers}...")
+    for idx, t in enumerate(all_tickers):
+        progress_bar.progress(min((idx + 1) / total_tickers, 1.0), text=f"Scanning charts {idx+1}/{total_tickers}...")
         
         try:
-            history = yf.download(chunk, period="30d", interval="1d", group_by='ticker', progress=False, multi_level_index=False)
-            
-            for t in chunk:
+            if batch_mode:
                 if t not in history.columns.levels[0]:
                     continue
                 df_stock = history[t].dropna()
-                if len(df_stock) < 20:
-                    continue
+            else:
+                # Automatic fallback: fetch individually to bypass connection drops
+                df_stock = yf.download(t, period="30d", interval="1d", progress=False, multi_level_index=False).dropna()
+                
+            if len(df_stock) < 20:
+                continue
+                
+            close_prices = df_stock['Close'].values
+            if len(close_prices) == 0 or np.isnan(close_prices[-1]):
+                continue
+            
+            recent_closes = close_prices[-5:]
+            older_closes = close_prices[-20:-5]
+            
+            if pattern == "Bull Flag / Consolidation":
+                prior_return = (older_closes[-1] - older_closes[0]) / older_closes[0]
+                recent_std = np.std(recent_closes) / np.mean(recent_closes)
+                if prior_return > 0.025 and recent_std < 0.025:
+                    matches.append(t)
                     
-                close_prices = df_stock['Close'].values
-                if len(close_prices) == 0 or np.isnan(close_prices[-1]):
-                    continue
-                
-                recent_closes = close_prices[-5:]
-                older_closes = close_prices[-20:-5]
-                
-                if pattern == "Bull Flag / Consolidation":
-                    prior_return = (older_closes[-1] - older_closes[0]) / older_closes[0]
-                    recent_std = np.std(recent_closes) / np.mean(recent_closes)
-                    if prior_return > 0.025 and recent_std < 0.025:
-                        matches.append(t)
-                        
-                elif pattern == "High Volatility Breakout":
-                    today_return = abs((close_prices[-1] - close_prices[-2]) / close_prices[-2])
-                    historical_std = np.std(close_prices[-20:-1]) / np.mean(close_prices[-20:-1])
-                    if today_return > (historical_std * 1.8):
-                        matches.append(t)
-                        
-                elif pattern == "Bear Flag":
-                    prior_return = (older_closes[-1] - older_closes[0]) / older_closes[0]
-                    recent_std = np.std(recent_closes) / np.mean(recent_closes)
-                    if prior_return < -0.025 and recent_std < 0.025:
-                        matches.append(t)
-                        
+            elif pattern == "High Volatility Breakout":
+                today_return = abs((close_prices[-1] - close_prices[-2]) / close_prices[-2])
+                historical_std = np.std(close_prices[-20:-1]) / np.mean(close_prices[-20:-1])
+                if today_return > (historical_std * 1.8):
+                    matches.append(t)
+                    
+            elif pattern == "Bear Flag":
+                prior_return = (older_closes[-1] - older_closes[0]) / older_closes[0]
+                recent_std = np.std(recent_closes) / np.mean(recent_closes)
+                if prior_return < -0.025 and recent_std < 0.025:
+                    matches.append(t)
+                    
         except Exception:
             continue
             
@@ -103,9 +110,8 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
             
     return pd.DataFrame(final_rows)
 
-# 3. UPGRADED: 1-YEAR HIGH-DENSITY SPARKLINE GENERATOR
+# 3. 1-YEAR HIGH-DENSITY TREND SPARKLINE
 def draw_mini_trendline(ticker_symbol):
-    # Expanded timeline window to 1-year (252 trading bars)
     df_mini = yf.download(ticker_symbol, period="1y", interval="1d", progress=False, multi_level_index=False)
     if df_mini.empty:
         return None
@@ -117,8 +123,7 @@ def draw_mini_trendline(ticker_symbol):
         mode='lines'
     ))
     fig.update_layout(
-        height=120,
-        margin=dict(l=2, r=2, t=2, b=2),
+        height=120, margin=dict(l=2, r=2, t=2, b=2),
         xaxis=dict(visible=False, showgrid=False),
         yaxis=dict(visible=False, showgrid=False),
         showlegend=False, dragmode=False, template="plotly_dark",
@@ -126,11 +131,11 @@ def draw_mini_trendline(ticker_symbol):
     )
     return fig
 
-# --- ROUTER ENGINE ---
+# --- ROUTER SYSTEM ---
 target_view = st.query_params.get("view_ticker", None)
 
 if target_view is not None:
-    # --- PAGE 1: DEEP-DIVE FULL CANDLESTICK VIEW ---
+    # --- DEEP-DIVE FULL CHART VIEW ---
     if st.button("⬅️ Back to Miniature Grid Layout"):
         st.query_params.clear()
         st.rerun()
@@ -160,7 +165,7 @@ if target_view is not None:
             st.plotly_chart(fig, use_container_width=True, config={'staticPlot': False, 'scrollZoom': False, 'displayModeBar': False})
 
 else:
-    # --- PAGE 2: MAIN DASHBOARD GRID VIEW ---
+    # --- MASTER DASHBOARD GRID VIEW ---
     st.write("## 🔍 Visual Chart Pattern Screener")
     list_of_tickers = load_liquid_universe()
     
@@ -188,47 +193,25 @@ else:
         screened_matches = st.session_state[state_key]
         
         if not screened_matches.empty:
-            # Injecting direct CSS Grid layout definitions to hardlock the 2-column format on small mobile webviews
+            # Force side-by-side 2 columns on phone screens by stacking grid logic safely
             st.markdown("""
             <style>
-                .mobile-grid {
-                    display: grid;
-                    grid-template-columns: repeat(2, 1fr);
-                    gap: 12px;
-                    width: 100%;
-                }
-                .stock-card {
-                    background-color: #1E1E1E;
-                    border: 1px solid #333333;
-                    border-radius: 8px;
-                    padding: 10px;
-                    text-align: center;
-                }
+                .mobile-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; width: 100%; }
+                .stock-card { background-color: #1E1E1E; border: 1px solid #333333; border-radius: 8px; padding: 10px; text-align: center; }
             </style>
             """, unsafe_allow_html=True)
             
-            # Open HTML grid wrapper string
             grid_html = '<div class="mobile-grid">'
-            
-            # Loop through matched stocks and build out the structured gallery
             for idx, row_data in screened_matches.iterrows():
-                ticker = row_data['Ticker']
-                price = row_data['Price']
-                
-                # Append each cell's card structure layout
-                grid_html += f'<div class="stock-card"><strong>{ticker}</strong><br><span style="color:#BBBBBB;">${price:.2f}</span></div>'
-                
+                grid_html += f'<div class="stock-card"><strong>{row_data["Ticker"]}</strong><br><span style="color:#BBBBBB;">${row_data["Price"]:.2f}</span></div>'
             grid_html += '</div>'
             
-            # Render the permanent 2-column text boxes
             st.markdown(grid_html, unsafe_allow_html=True)
             st.markdown("---")
-            st.write("#### 📈 Tap Ticker Below to View Complete 1-Year Moving Average Candlestick Profile")
+            st.write("#### 📈 1-Year Structural Trend Profiles")
             
-            # Draw individual clean chart row targets under the locked header text
             for idx, row_data in screened_matches.iterrows():
                 ticker_target = row_data['Ticker']
-                
                 with st.container(border=True):
                     col_left, col_right = st.columns([3, 1])
                     with col_left:
