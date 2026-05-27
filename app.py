@@ -127,21 +127,20 @@ def draw_mini_candlestick(ticker_symbol):
     )
     return fig
 
-# --- NAVIGATION CONTROLLER VIA QUERY PARAMS ---
-query_params = st.query_params
+# --- ROUTER ENGINE VIA URL QUERY CONFIGURATIONS ---
+# If a specific ticker parameter is active in the URL, go straight to Deep-Dive View
+target_view = st.query_params.get("view_ticker", None)
 
-if "view_ticker" in query_params:
-    # --- DEEP-DIVE FULL CHART VIEW ---
-    selected_ticker = query_params["view_ticker"]
-    
-    if st.button("⬅️ Back to Miniature Grid"):
+if target_view is not None:
+    # --- PAGE 1: DEEP-DIVE FULL CANDLESTICK VIEW ---
+    if st.button("⬅️ Back to Miniature Grid Layout"):
         st.query_params.clear()
         st.rerun()
         
-    st.markdown(f"## 📊 Candlestick Trend Profile: `{selected_ticker}`")
+    st.markdown(f"## 📊 Candlestick Trend Profile: `{target_view}`")
     
     with st.spinner("Generating 1-year candlestick framework..."):
-        df_year = yf.download(selected_ticker, period="1y", interval="1d", progress=False, multi_level_index=False)
+        df_year = yf.download(target_view, period="1y", interval="1d", progress=False, multi_level_index=False)
         if not df_year.empty:
             df_year['50 MA'] = df_year['Close'].rolling(window=50).mean()
             df_year['200 MA'] = df_year['Close'].rolling(window=200).mean()
@@ -162,8 +161,9 @@ if "view_ticker" in query_params:
             )
             st.plotly_chart(fig, use_container_width=True, config={'staticPlot': False, 'scrollZoom': False, 'displayModeBar': False})
 
+# If no target ticker is selected, default straight to the main visual home dashboard
 else:
-    # --- MASTER SCREENER DASHBOARD VIEW ---
+    # --- PAGE 2: MAIN DASHBOARD GRID VIEW ---
     st.write("## 🔍 Visual Chart Pattern Screener")
     list_of_tickers = load_liquid_universe()
     
@@ -191,11 +191,9 @@ else:
         screened_matches = st.session_state[state_key]
         
         if not screened_matches.empty:
-            # Pair items into native layout rows cleanly
             for idx in range(0, len(screened_matches), 2):
                 grid_cols = st.columns(2)
                 
-                # Box A
                 if idx < len(screened_matches):
                     row_data = screened_matches.iloc[idx]
                     with grid_cols[0]:
@@ -205,10 +203,9 @@ else:
                             if fig_thumb:
                                 st.plotly_chart(fig_thumb, use_container_width=True, config={'staticPlot': True})
                             if st.button(f"Zoom", key=f"btn_{row_data['Ticker']}", use_container_width=True):
-                                st.query_params.view_ticker = row_data['Ticker']
+                                st.query_params["view_ticker"] = row_data['Ticker']
                                 st.rerun()
                                 
-                # Box B
                 if (idx + 1) < len(screened_matches):
                     row_data = screened_matches.iloc[idx + 1]
                     with grid_cols[1]:
@@ -218,9 +215,7 @@ else:
                             if fig_thumb:
                                 st.plotly_chart(fig_thumb, use_container_width=True, config={'staticPlot': True})
                             if st.button(f"Zoom", key=f"btn_{row_data['Ticker']}", use_container_width=True):
-                                st.query_params.view_ticker = row_data['Ticker']
+                                st.query_params["view_ticker"] = row_data['Ticker']
                                 st.rerun()
         else:
             st.warning("No highly liquid stocks are hitting this strict math baseline today.")
-else:
-    st.info("Select a chart pattern strategy above to initiate the visual scan grid.")
