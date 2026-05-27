@@ -18,7 +18,7 @@ def load_ibd50_universe():
     ]
     return sorted(list(set(tickers)))
 
-# 2. DEFENSIVE SCAN ENGINE (Uses standard cross-sections to safely handle multi-level columns)
+# 2. DEFENSIVE SCAN ENGINE (With Multi-Index Normalization)
 def run_optimized_scan(all_tickers, pattern, market_cap_limit):
     if pattern == "None" or not all_tickers:
         return pd.DataFrame()
@@ -31,16 +31,13 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
         progress_bar.progress(min((idx + 1) / total_tickers, 1.0), text=f"Scanning IBD 50 charts {idx+1}/{total_tickers}...")
         
         try:
-            # FIX: Removed multi_level_index=False parameter to bypass server data truncation
-            raw_data = yf.download(t, period="30d", interval="1d", progress=False)
-            if raw_data.empty:
+            df_stock = yf.download(t, period="30d", interval="1d", progress=False)
+            if df_stock.empty:
                 continue
                 
-            # FIX: Safely flatten the columns if yfinance returns a multi-index block
-            if isinstance(raw_data.columns, pd.MultiIndex):
-                df_stock = raw_data.xs(t, axis=1, level=1) if t in raw_data.columns.levels[1] else raw_data.copy()
-            else:
-                df_stock = raw_data.copy()
+            # FIX: Safely flatten multi-level headers if yfinance forces them
+            if isinstance(df_stock.columns, pd.MultiIndex):
+                df_stock.columns = df_stock.columns.get_level_values(0)
                 
             df_stock = df_stock.dropna()
             if len(df_stock) < 20:
@@ -56,6 +53,7 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
             if pattern == "Bull Flag / Consolidation":
                 prior_return = (older_closes[-1] - older_closes[0]) / older_closes[0]
                 recent_std = np.std(recent_closes) / np.mean(recent_closes)
+                # Standardized baseline window parameters for accurate technical scanning
                 if prior_return > 0.025 and recent_std < 0.035:
                     matches.append(t)
                     
@@ -94,16 +92,15 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
             
     return pd.DataFrame(final_rows)
 
-# 3. 1-YEAR WIDE SPARKLINE GENERATOR
+# 3. 1-YEAR WIDE SPARKLINE GENERATOR (With Multi-Index Normalization)
 def draw_wide_trendline(ticker_symbol):
-    raw_data = yf.download(ticker_symbol, period="1y", interval="1d", progress=False)
-    if raw_data.empty:
+    df_mini = yf.download(ticker_symbol, period="1y", interval="1d", progress=False)
+    if df_mini.empty:
         return None
         
-    if isinstance(raw_data.columns, pd.MultiIndex):
-        df_mini = raw_data.xs(ticker_symbol, axis=1, level=1) if ticker_symbol in raw_data.columns.levels[1] else raw_data.copy()
-    else:
-        df_mini = raw_data.copy()
+    # FIX: Flatten header to ensure data extraction doesn't turn up blank
+    if isinstance(df_mini.columns, pd.MultiIndex):
+        df_mini.columns = df_mini.columns.get_level_values(0)
         
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -132,12 +129,11 @@ if target_view is not None:
     st.markdown(f"## 📊 Candlestick Trend Profile: `{target_view}`")
     
     with st.spinner("Generating 1-year candlestick framework..."):
-        raw_data = yf.download(target_view, period="1y", interval="1d", progress=False)
-        if not raw_data.empty:
-            if isinstance(raw_data.columns, pd.MultiIndex):
-                df_year = raw_data.xs(target_view, axis=1, level=1) if target_view in raw_data.columns.levels[1] else raw_data.copy()
-            else:
-                df_year = raw_data.copy()
+        df_year = yf.download(target_view, period="1y", interval="1d", progress=False)
+        if not df_year.empty:
+            # FIX: Flatten header arrays for the technical moving averages calculation block
+            if isinstance(df_year.columns, pd.MultiIndex):
+                df_year.columns = df_year.columns.get_level_values(0)
                 
             df_year['50 MA'] = df_year['Close'].rolling(window=50).mean()
             df_year['200 MA'] = df_year['Close'].rolling(window=200).mean()
