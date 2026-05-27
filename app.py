@@ -18,7 +18,7 @@ def load_ibd50_universe():
     ]
     return sorted(list(set(tickers)))
 
-# 2. DEFENSIVE SCAN ENGINE
+# 2. DEFENSIVE SCAN ENGINE (Forces clean 1D float vectors to bypass extraction errors)
 def run_optimized_scan(all_tickers, pattern, market_cap_limit):
     if pattern == "None" or not all_tickers:
         return pd.DataFrame()
@@ -35,12 +35,16 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
             if df_stock.empty or len(df_stock) < 20:
                 continue
                 
-            if hasattr(df_stock.columns, 'get_level_values'):
-                df_stock.columns = [str(col[0] if isinstance(col, tuple) else col) for col in df_stock.columns]
+            # FIX: Cleanly normalizes multi-index structures to flat strings
+            if isinstance(df_stock.columns, pd.MultiIndex):
+                df_stock.columns = [str(c[0]) for c in df_stock.columns]
+            else:
+                df_stock.columns = [str(c) for c in df_stock.columns]
             
             df_stock = df_stock.dropna()
             
-            close_prices = df_stock.loc[:, 'Close'].to_numpy().flatten()
+            # FIX: Forces extraction of direct 1D float vectors to fix math evaluation
+            close_prices = df_stock['Close'].astype(float).values.flatten()
             if len(close_prices) == 0 or np.isnan(close_prices[-1]):
                 continue
             
@@ -95,10 +99,12 @@ def draw_wide_trendline(ticker_symbol):
     if df_mini.empty:
         return None
         
-    if hasattr(df_mini.columns, 'get_level_values'):
-        df_mini.columns = [str(col[0] if isinstance(col, tuple) else col) for col in df_mini.columns]
+    if isinstance(df_mini.columns, pd.MultiIndex):
+        df_mini.columns = [str(c[0]) for c in df_mini.columns]
+    else:
+        df_mini.columns = [str(c) for c in df_mini.columns]
         
-    close_vals = df_mini.loc[:, 'Close'].to_numpy().flatten()
+    close_vals = df_mini['Close'].astype(float).values.flatten()
     
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -116,11 +122,10 @@ def draw_wide_trendline(ticker_symbol):
     return fig
 
 # --- ROUTER SYSTEM ---
-# FIX: Explicit dictionary checking syntax avoids routing locks and blank screens
 target_view = st.query_params["view_ticker"] if "view_ticker" in st.query_params else None
 
 if target_view is not None:
-    # --- PAGE 1: FULLY INTERACTIVE DEEP-DIVE VIEW ---
+    # --- PAGE 1: FULLY INTERACTIVE DEEP-DIVE CANDLESTICK VIEW ---
     if st.button("⬅️ Back to IBD 50 List"):
         st.query_params.clear()
         st.rerun()
@@ -130,13 +135,15 @@ if target_view is not None:
     with st.spinner("Generating 1-year candlestick framework..."):
         df_year = yf.download(target_view, period="1y", interval="1d", progress=False)
         if not df_year.empty:
-            if hasattr(df_year.columns, 'get_level_values'):
-                df_year.columns = [str(col[0] if isinstance(col, tuple) else col) for col in df_year.columns]
+            if isinstance(df_year.columns, pd.MultiIndex):
+                df_year.columns = [str(c[0]) for c in df_year.columns]
+            else:
+                df_year.columns = [str(c) for c in df_year.columns]
                 
-            close_y = df_year.loc[:, 'Close'].to_numpy().flatten()
-            open_y = df_year.loc[:, 'Open'].to_numpy().flatten()
-            high_y = df_year.loc[:, 'High'].to_numpy().flatten()
-            low_y = df_year.loc[:, 'Low'].to_numpy().flatten()
+            close_y = df_year['Close'].astype(float).values.flatten()
+            open_y = df_year['Open'].astype(float).values.flatten()
+            high_y = df_year['High'].astype(float).values.flatten()
+            low_y = df_year['Low'].astype(float).values.flatten()
             
             df_year_flat = pd.DataFrame(index=df_year.index)
             df_year_flat['Close'] = close_y
