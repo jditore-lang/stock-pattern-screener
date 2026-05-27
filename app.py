@@ -6,21 +6,6 @@ import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
 
-# Inject safe structural CSS targeting explicit column containers to bypass structural crashes
-st.markdown("""
-<style>
-    /* Force columns to stick strictly to 50% width on small phone viewports */
-    [data-testid="column"] {
-        width: calc(50% - 8px) !important;
-        flex: 1 1 calc(50% - 8px) !important;
-        min-width: calc(50% - 8px) !important;
-    }
-    /* Compact the display padding gaps for premium high-density scannability */
-    div.block-container { padding-top: 1.5rem; padding-bottom: 1rem; }
-    [data-testid="stMetricValue"] { font-size: 1.25rem !important; }
-</style>
-""", unsafe_allow_html=True)
-
 # 1. DOWNLOAD A LIQUID, HIGH-VOLUME MARKET UNIVERSE
 @st.cache_data(ttl=86400)
 def load_liquid_universe():
@@ -133,7 +118,7 @@ def draw_mini_candlestick(ticker_symbol):
         line_width=1.5
     ))
     fig.update_layout(
-        height=100,
+        height=130,
         margin=dict(l=2, r=2, t=2, b=2),
         xaxis=dict(visible=False, showgrid=False),
         yaxis=dict(visible=False, showgrid=False),
@@ -142,7 +127,7 @@ def draw_mini_candlestick(ticker_symbol):
     )
     return fig
 
-# --- NAVIGATION CONTROLLER ---
+# --- NAVIGATION CONTROLLER VIA QUERY PARAMS ---
 query_params = st.query_params
 
 if "view_ticker" in query_params:
