@@ -46,7 +46,7 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
             if pattern == "Bull Flag / Consolidation":
                 prior_return = (older_closes[-1] - older_closes[0]) / older_closes[0]
                 recent_std = np.std(recent_closes) / np.mean(recent_closes)
-                if prior_return > 0.025 and recent_std < 0.025:
+                if prior_return > 0.025 and recent_std < 0.035:
                     matches.append(t)
                     
             elif pattern == "High Volatility Breakout":
