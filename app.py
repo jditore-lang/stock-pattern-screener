@@ -103,22 +103,21 @@ def run_optimized_scan(all_tickers, pattern, market_cap_limit):
             
     return pd.DataFrame(final_rows)
 
-# 3. HIGH-DENSITY MINI CANDLESTICK GENERATOR
-def draw_mini_candlestick(ticker_symbol):
-    df_mini = yf.download(ticker_symbol, period="15d", interval="1d", progress=False, multi_level_index=False)
+# 3. UPGRADED: 1-YEAR HIGH-DENSITY SPARKLINE GENERATOR
+def draw_mini_trendline(ticker_symbol):
+    # Expanded timeline window to 1-year (252 trading bars)
+    df_mini = yf.download(ticker_symbol, period="1y", interval="1d", progress=False, multi_level_index=False)
     if df_mini.empty:
         return None
         
     fig = go.Figure()
-    fig.add_trace(go.Candlestick(
-        x=df_mini.index,
-        open=df_mini['Open'], high=df_mini['High'],
-        low=df_mini['Low'], close=df_mini['Close'],
-        increasing_line_color='#00FFCC', decreasing_line_color='#FF3366',
-        line_width=1.5
+    fig.add_trace(go.Scatter(
+        x=df_mini.index, y=df_mini['Close'],
+        line=dict(color='#00FFCC', width=1.5),
+        mode='lines'
     ))
     fig.update_layout(
-        height=130,
+        height=120,
         margin=dict(l=2, r=2, t=2, b=2),
         xaxis=dict(visible=False, showgrid=False),
         yaxis=dict(visible=False, showgrid=False),
@@ -127,8 +126,7 @@ def draw_mini_candlestick(ticker_symbol):
     )
     return fig
 
-# --- ROUTER ENGINE VIA URL QUERY CONFIGURATIONS ---
-# If a specific ticker parameter is active in the URL, go straight to Deep-Dive View
+# --- ROUTER ENGINE ---
 target_view = st.query_params.get("view_ticker", None)
 
 if target_view is not None:
@@ -161,7 +159,6 @@ if target_view is not None:
             )
             st.plotly_chart(fig, use_container_width=True, config={'staticPlot': False, 'scrollZoom': False, 'displayModeBar': False})
 
-# If no target ticker is selected, default straight to the main visual home dashboard
 else:
     # --- PAGE 2: MAIN DASHBOARD GRID VIEW ---
     st.write("## 🔍 Visual Chart Pattern Screener")
@@ -191,31 +188,57 @@ else:
         screened_matches = st.session_state[state_key]
         
         if not screened_matches.empty:
-            for idx in range(0, len(screened_matches), 2):
-                grid_cols = st.columns(2)
+            # Injecting direct CSS Grid layout definitions to hardlock the 2-column format on small mobile webviews
+            st.markdown("""
+            <style>
+                .mobile-grid {
+                    display: grid;
+                    grid-template-columns: repeat(2, 1fr);
+                    gap: 12px;
+                    width: 100%;
+                }
+                .stock-card {
+                    background-color: #1E1E1E;
+                    border: 1px solid #333333;
+                    border-radius: 8px;
+                    padding: 10px;
+                    text-align: center;
+                }
+            </style>
+            """, unsafe_allow_html=True)
+            
+            # Open HTML grid wrapper string
+            grid_html = '<div class="mobile-grid">'
+            
+            # Loop through matched stocks and build out the structured gallery
+            for idx, row_data in screened_matches.iterrows():
+                ticker = row_data['Ticker']
+                price = row_data['Price']
                 
-                if idx < len(screened_matches):
-                    row_data = screened_matches.iloc[idx]
-                    with grid_cols[0]:
-                        with st.container(border=True):
-                            st.markdown(f"**{row_data['Ticker']}** | ${row_data['Price']:.2f}")
-                            fig_thumb = draw_mini_candlestick(row_data['Ticker'])
-                            if fig_thumb:
-                                st.plotly_chart(fig_thumb, use_container_width=True, config={'staticPlot': True})
-                            if st.button(f"Zoom", key=f"btn_{row_data['Ticker']}", use_container_width=True):
-                                st.query_params["view_ticker"] = row_data['Ticker']
-                                st.rerun()
-                                
-                if (idx + 1) < len(screened_matches):
-                    row_data = screened_matches.iloc[idx + 1]
-                    with grid_cols[1]:
-                        with st.container(border=True):
-                            st.markdown(f"**{row_data['Ticker']}** | ${row_data['Price']:.2f}")
-                            fig_thumb = draw_mini_candlestick(row_data['Ticker'])
-                            if fig_thumb:
-                                st.plotly_chart(fig_thumb, use_container_width=True, config={'staticPlot': True})
-                            if st.button(f"Zoom", key=f"btn_{row_data['Ticker']}", use_container_width=True):
-                                st.query_params["view_ticker"] = row_data['Ticker']
-                                st.rerun()
+                # Append each cell's card structure layout
+                grid_html += f'<div class="stock-card"><strong>{ticker}</strong><br><span style="color:#BBBBBB;">${price:.2f}</span></div>'
+                
+            grid_html += '</div>'
+            
+            # Render the permanent 2-column text boxes
+            st.markdown(grid_html, unsafe_allow_html=True)
+            st.markdown("---")
+            st.write("#### 📈 Tap Ticker Below to View Complete 1-Year Moving Average Candlestick Profile")
+            
+            # Draw individual clean chart row targets under the locked header text
+            for idx, row_data in screened_matches.iterrows():
+                ticker_target = row_data['Ticker']
+                
+                with st.container(border=True):
+                    col_left, col_right = st.columns([3, 1])
+                    with col_left:
+                        fig_thumb = draw_mini_trendline(ticker_target)
+                        if fig_thumb:
+                            st.plotly_chart(fig_thumb, use_container_width=True, config={'staticPlot': True})
+                    with col_right:
+                        st.write(f"**{ticker_target}**")
+                        if st.button(f"Zoom", key=f"btn_nav_{ticker_target}", use_container_width=True):
+                            st.query_params["view_ticker"] = ticker_target
+                            st.rerun()
         else:
             st.warning("No highly liquid stocks are hitting this strict math baseline today.")
